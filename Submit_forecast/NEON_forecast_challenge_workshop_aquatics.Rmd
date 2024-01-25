@@ -49,7 +49,7 @@ library(lubridate)
 ```
 
 If you do not wish to run the code yourself you can follow along via the html (NEON_forecast_challenge_workshop.md), which can be downloaded from the [Github repository](https://github.com/OlssonF/NEON-forecast-challenge-workshop). 
- 
+
 # Introduction to NEON forecast challenge
 
 The EFI RCN NEON Forecast Challenge asks the scientific community to produce ecological forecasts of future conditions at NEON sites by leveraging NEON's open data products. The Challenge is split into five themes that span aquatic and terrestrial systems, and population, community, and ecosystem processes across a broad range of ecoregions. We are excited to use this Challenge to learn more about the predictability of ecological processes by forecasting NEON data before it is collected.  
@@ -171,7 +171,7 @@ Note: This code chunk can take a few minutes to execute as it accesses the NOAA 
 # past stacked weather
 noaa_past_s3 <- neon4cast::noaa_stage3()
 
-variables <- c("air_temperature","air_pressure")
+variables <- c("air_temperature")
 #Other variable names can be found at https://projects.ecoforecast.org/neon4cast-docs/Shared-Forecast-Drivers.html#stage-3
 
 noaa_past <- noaa_past_s3  |> 
@@ -207,7 +207,7 @@ forecast_date <- Sys.Date()
 noaa_date <- forecast_date - days(1)
 
 noaa_future_s3 <- neon4cast::noaa_stage2(start_date = as.character(noaa_date))
-variables <- c("air_temperature","air_pressure")
+variables <- c("air_temperature")
 
 noaa_future <- noaa_future_s3 |> 
   dplyr::filter(datetime >= forecast_date,
@@ -228,7 +228,6 @@ noaa_future_daily <- noaa_future |>
   pivot_wider(names_from = variable, values_from = prediction) |>
   # convert to Celsius
   mutate(air_temperature = air_temperature - 273.15) |> 
-  mutate(air_pressure = air_pressure)
   select(datetime, site_id, air_temperature, parameter)
 
 noaa_future_daily
@@ -242,18 +241,6 @@ ggplot(noaa_future_daily, aes(x=datetime, y=air_temperature)) +
   facet_wrap(~site_id, scales = 'free')
 
 ggplot(noaa_future_daily, aes(x=datetime, y=air_temperature)) +
-  geom_line(aes(group = parameter), alpha = 0.4)+
-  geom_line(data = noaa_past_mean, colour = 'darkblue') +
-  coord_cartesian(xlim = c(noaa_date - days(60),
-                           noaa_date + days(35)))+
-  facet_wrap(~site_id, scales = 'free')
-
-ggplot(noaa_future_daily, aes(x=datetime, y=air_pressure)) +
-  geom_line(aes(group = parameter), alpha = 0.4)+
-  geom_line(data = noaa_past_mean, colour = 'darkblue') +
-  facet_wrap(~site_id, scales = 'free')
-
-ggplot(noaa_future_daily, aes(x=datetime, y=air_pressure)) +
   geom_line(aes(group = parameter), alpha = 0.4)+
   geom_line(data = noaa_past_mean, colour = 'darkblue') +
   coord_cartesian(xlim = c(noaa_date - days(60),
@@ -290,11 +277,10 @@ noaa_future_site <- noaa_future_daily |>
   filter(site_id == example_site)
 
 #Fit linear model based on past data: water temperature = m * air temperature + b
-fit <- lm(site_target$temperature ~ site_target$air_temperature + log(site_target$air_pressure))
+fit <- lm(site_target$temperature ~ site_target$air_temperature)
     
 # use linear regression to forecast water temperature for each ensemble member
-forecasted_temperature <- fit$coefficients[1] + fit$coefficients[2] * noaa_future_site$air_temperature +
-    fit$coefficients[3] * log(noaa_future_site$air_pressure)
+forecasted_temperature <- fit$coefficients[1] + fit$coefficients[2] * noaa_future_site$air_temperature
 
 ```
 
@@ -317,12 +303,11 @@ for(i in 1:length(lake_sites$field_site_id)) {
     filter(site_id == example_site)
   
   #Fit linear model based on past data: water temperature = m * air temperature + b
-  fit <- lm(site_target$temperature ~ site_target$air_temperature + log(site_target$air_pressure))
+  fit <- lm(site_target$temperature ~ site_target$air_temperature)
   # fit <- lm(site_target$temperature ~ ....)
     
   # use linear regression to forecast water temperature for each ensemble member
-  forecasted_temperature <- fit$coefficients[1] + fit$coefficients[2] * noaa_future_site$air_temperature +
-              fit$coefficients[3] * log(noaa_future_site$air_pressure)
+  forecasted_temperature <- fit$coefficients[1] + fit$coefficients[2] * noaa_future_site$air_temperature
     
   # put all the relavent information into a tibble that we can bind together
   temperature <- tibble(datetime = noaa_future_site$datetime,
@@ -434,12 +419,6 @@ Is the linear model a reasonable relationship between air temperature and water 
 
 ```{r, echo=F, warning=F}
 ggplot(targets_lm, aes(x=air_temperature, y= temperature, colour = site_id)) +
-  geom_point(alpha = 0.5) +
-  geom_smooth(method = 'lm') +
-  theme_bw() +
-  facet_wrap(~site_id)
-
-ggplot(targets_lm, aes(x=air_pressure, y= temperature, colour = site_id)) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = 'lm') +
   theme_bw() +
@@ -990,4 +969,3 @@ site_var_combinations <-
 RW_forecasts <- purrr::pmap_dfr(site_var_combinations, RW_daily_forecast) 
 
 ```
-
