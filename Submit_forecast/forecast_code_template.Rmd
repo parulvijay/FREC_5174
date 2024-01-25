@@ -1,5 +1,6 @@
 ---
 title: "NEON forecast challenge submission"
+author: Parul Patil
 output: html_document
 date: "`r Sys.Date()`"
 ---
@@ -116,11 +117,11 @@ for(i in 1:length(lake_sites$field_site_id)) {
     filter(site_id == example_site)
   
   #Fit linear model based on past data: water temperature = m * air temperature + b
-  fit <- lm(site_target$temperature ~ site_target$air_temperature)
+  fit <- lm(site_target$temperature ~ site_target$air_temperature + I(site_target$air_temperature^2))
   # fit <- lm(site_target$temperature ~ ....)
     
   # use linear regression to forecast water temperature for each ensemble member
-  forecasted_temperature <- fit$coefficients[1] + fit$coefficients[2] * noaa_future_site$air_temperature
+  forecasted_temperature <- fit$coefficients[1] + fit$coefficients[2] * noaa_future_site$air_temperature + fit$coefficients[3] * noaa_future_site$air_temperature
     
   # put all the relavent information into a tibble that we can bind together
   temperature <- tibble(datetime = noaa_future_site$datetime,
@@ -138,7 +139,7 @@ for(i in 1:length(lake_sites$field_site_id)) {
 ```{r make-standard}
 # Make forecast fit the EFI standards
 # Remember to change the model_id when you make changes to the model structure!
-my_model_id <- 'example_ID'
+my_model_id <- 'example_pvp'
 
 temp_lm_forecast_EFI <- temp_lm_forecast %>%
   filter(datetime > forecast_date) %>%
