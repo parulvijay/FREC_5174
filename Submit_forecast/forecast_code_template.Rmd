@@ -118,10 +118,22 @@ for(i in 1:length(lake_sites$field_site_id)) {
   
   #Fit linear model based on past data: water temperature = m * air temperature + b
   fit <- lm(site_target$temperature ~ site_target$air_temperature + I(site_target$air_temperature^2))
-  # fit <- lm(site_target$temperature ~ ....)
-    
+
+    fit_summary <- summary(fit)
+  
+  # Get parameters
+  coeffs <- round(fit$coefficients, 2)
+  params_se <- fit_summary$coefficients[,2]
+
+  param.df <- data.frame(beta1 = rnorm(31, coeffs[1], params_se[1]),
+                 beta2 = rnorm(31, coeffs[2], params_se[2]),
+                 beta3 = rnorm(31, coeffs[3], params_se[3]))
+  sigma <- sd(fit$residuals, na.rm = TRUE)
+
   # use linear regression to forecast water temperature for each ensemble member
-  forecasted_temperature <- fit$coefficients[1] + fit$coefficients[2] * noaa_future_site$air_temperature + fit$coefficients[3] * noaa_future_site$air_temperature
+  forecasted_temperature <- param.df$beta1 + param.df$beta2 * noaa_future_site$air_temperature     + param.df$beta3 * noaa_future_site$air_temperature + rnorm(31, mean = 0, sd = sigma)
+
+  # forecasted_temperature <- fit$coefficients[1] + fit$coefficients[2] * noaa_future_site$air_temperature + fit$coefficients[3] * noaa_future_site$air_temperature 
     
   # put all the relavent information into a tibble that we can bind together
   temperature <- tibble(datetime = noaa_future_site$datetime,
@@ -136,10 +148,11 @@ for(i in 1:length(lake_sites$field_site_id)) {
 }
 ```
 
+
 ```{r make-standard}
 # Make forecast fit the EFI standards
 # Remember to change the model_id when you make changes to the model structure!
-my_model_id <- 'example_pvp'
+my_model_id <- 'example_pvp1'
 
 temp_lm_forecast_EFI <- temp_lm_forecast %>%
   filter(datetime > forecast_date) %>%
