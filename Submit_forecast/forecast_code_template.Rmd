@@ -131,7 +131,7 @@ for(i in 1:length(lake_sites$field_site_id)) {
   sigma <- sd(fit$residuals, na.rm = TRUE)
 
   # use linear regression to forecast water temperature for each ensemble member
-  forecasted_temperature <- param.df$beta1 + param.df$beta2 * noaa_future_site$air_temperature     + param.df$beta3 * noaa_future_site$air_temperature + rnorm(31, mean = 0, sd = sigma)
+  forecasted_temperature <- param.df$beta1 + param.df$beta2 * noaa_future_site$air_temperature     + param.df$beta3 * noaa_future_site$air_temperature^2 + rnorm(31, mean = 0, sd = sigma)
 
   # forecasted_temperature <- fit$coefficients[1] + fit$coefficients[2] * noaa_future_site$air_temperature + fit$coefficients[3] * noaa_future_site$air_temperature 
     
