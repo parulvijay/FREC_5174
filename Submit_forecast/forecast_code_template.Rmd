@@ -20,10 +20,10 @@ knitr::opts_chunk$set(echo = TRUE)
 # install.packages('tidyverse') # collection of R packages for data manipulation, analysis, and visualisation
 # install.packages('lubridate') # working with dates and times
 # remotes::install_github('eco4cast/neon4cast') # package from NEON4cast challenge organisers to assist with forecast building and submission
-# install.packages("tidymodels")
-# install.packages("parsnip")
-# install.packages("baguette")
-# install.packages("modeltime")
+install.packages("tidymodels")
+install.packages("parsnip")
+install.packages("baguette")
+install.packages("modeltime")
 # Load packages
 library(tidyverse)
 library(lubridate)
