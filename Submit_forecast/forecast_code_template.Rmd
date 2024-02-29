@@ -5,23 +5,32 @@ output: html_document
 date: "`r Sys.Date()`"
 ---
 
+##### Project: FREC_5174
+
+The first thing I looked at is what variables appear to affect water temperature. I found that the strongest correlations were between air temperature and shortwave/longwave radiation. Upon looking a bit further into this, I check which variables are correlated with each other - since we dont want multicollinearity and discarded those. All the selection was just done with an exploratory analysis. No actual model selection techniques were performed. I finally chose to keep in **air_temperature**, **precipitation_flux** and **surface_downwelling_shortwave_flux_in_air**
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
 ```{r load-packages, echo = F, warning=F, message=F}
-## install.packages('remotes')
-## install.packages('fpp3') # package for applying simple forecasting methods
-## install.packages('tsibble') # package for dealing with time series data sets and tsibble objects
-## install.packages('tidyverse') # collection of R packages for data manipulation, analysis, and visualisation
-## install.packages('lubridate') # working with dates and times
-## remotes::install_github('eco4cast/neon4cast') # package from NEON4cast challenge organisers to assist with forecast building and submission
-
+# install.packages('remotes')
+# install.packages('fpp3') # package for applying simple forecasting methods
+# install.packages('tsibble') # package for dealing with time series data sets and tsibble objects
+# install.packages('tidyverse') # collection of R packages for data manipulation, analysis, and visualisation
+# install.packages('lubridate') # working with dates and times
+# remotes::install_github('eco4cast/neon4cast') # package from NEON4cast challenge organisers to assist with forecast building and submission
+# install.packages("tidymodels")
+# install.packages("parsnip")
+# install.packages("baguette")
+# install.packages("modeltime")
 # Load packages
 library(tidyverse)
 library(lubridate)
-
+library(tidymodels)
+library(baguette)
+library(parsnip)
+library(modeltime)
 ```
 
 ```{r get-targets, message=F}
@@ -35,22 +44,28 @@ aquatic_sites <- read_csv("https://raw.githubusercontent.com/eco4cast/neon4cast-
 lake_sites <- aquatic_sites %>%
   filter(field_site_subtype == 'Lake')
 
+lake_sites <- unique(lake_sites$field_site_id)
+
 # Filter the targets
 targets <- targets %>%
-  filter(site_id %in% lake_sites$field_site_id,
+  filter(site_id %in% lake_sites,
          variable == 'temperature')
 ```
 
 ```{r get-NOAA-past, message = F}
 
-# Past stacked weather
-noaa_past_s3 <- neon4cast::noaa_stage3()
+df_past <- neon4cast::noaa_stage3()
 
-variables <- c("air_temperature")
-#Other variable names can be found at https://projects.ecoforecast.org/neon4cast-docs/Shared-Forecast-Drivers.html#stage-3
+variables <- c("air_temperature", "precipitation_flux", 
+               "surface_downwelling_shortwave_flux_in_air")
 
-noaa_past <- noaa_past_s3  |> 
-  dplyr::filter(site_id %in% lake_sites$field_site_id,
+# df_past |>
+#   dplyr::filter(site_id %in% lake_sites,
+#                 datetime >= ymd('2017-01-01')) |>
+#   dplyr::collect() |> summarize(var = unique(variables))
+
+noaa_past <- df_past |> 
+  dplyr::filter(site_id %in% lake_sites,
                 datetime >= ymd('2017-01-01'),
                 variable %in% variables) |> 
   dplyr::collect()
@@ -67,45 +82,47 @@ noaa_past_mean <- noaa_past |>
 ```
 
 ```{r get-NOAA-future, message = F}
-# Future weather
-# New forecast only available at 5am UTC the next day
 forecast_date <- Sys.Date() 
-noaa_date <- forecast_date - days(1)
+noaa_date <- forecast_date - lubridate::days(2)
 
-noaa_future_s3 <- neon4cast::noaa_stage2(start_date = as.character(noaa_date))
-variables <- c("air_temperature")
+df_future <- neon4cast::noaa_stage2(start_date = noaa_date)
 
-noaa_future <- noaa_future_s3 |> 
-  dplyr::filter(datetime >= forecast_date,
-                site_id %in% lake_sites$field_site_id,
+# use other variables
+variables <- variables <- c("air_temperature", "precipitation_flux", 
+                            "surface_downwelling_shortwave_flux_in_air")
+
+noaa_future <- df_future |> 
+  dplyr::filter(reference_datetime == noaa_date,
+                datetime >= forecast_date,
+                site_id %in% lake_sites,
                 variable %in% variables) |> 
-  collect()
+  dplyr::collect()
 
 noaa_future_daily <- noaa_future |> 
   mutate(datetime = as_date(datetime)) |> 
   # mean daily forecasts at each site per ensemble
-  group_by(datetime, site_id, parameter, variable) |> 
-  summarize(prediction = mean(prediction)) |>
+  summarize(prediction = mean(prediction), .by = c("datetime", "site_id", "parameter", "variable")) |>
   pivot_wider(names_from = variable, values_from = prediction) |>
   # convert to Celsius
   mutate(air_temperature = air_temperature - 273.15) |> 
-  select(datetime, site_id, air_temperature, parameter)
+  select(datetime, site_id, air_temperature, precipitation_flux, 
+               surface_downwelling_shortwave_flux_in_air, parameter)
 ```
 
 ```{r model-setup}
 # Generate a dataframe to fit the model to 
-targets_lm <- targets |> 
+targets_df <- targets |> 
   filter(variable == 'temperature') |>
   pivot_wider(names_from = 'variable', values_from = 'observation') |> 
   left_join(noaa_past_mean, 
-            by = c("datetime","site_id"))
+            by = c("datetime","site_id")) 
 
 # Loop through each site to fit the model
 temp_lm_forecast <- NULL
 
 ```
 
-```{r forecast-loop}
+```{r forecast-loop, eval = FALSE, include = FALSE}
 for(i in 1:length(lake_sites$field_site_id)) {  
   
   example_site <- lake_sites$field_site_id[i]
@@ -148,20 +165,137 @@ for(i in 1:length(lake_sites$field_site_id)) {
 }
 ```
 
+```{r}
+split <- initial_split(targets_df, prop = 0.80, strata = site_id)
+
+train_data <- training(split)
+test_data <- testing(split)
+
+our_recipe <- train_data |> 
+  recipe(temperature ~ .) |> 
+  # step_rm(datetime) |>
+  step_naomit(air_temperature, temperature, precipitation_flux, 
+               surface_downwelling_shortwave_flux_in_air)
+```
+
+The next step was to select the model. I tried a variety that included regression and arima (time series based regression), along with some tree methods such as random forest and bagged trees, and mars which is a non parameteric regression which makes it flexible to model nonlinearity and interactions. 
+
+I did not evaluate this code because this will be running everyday so I just looked at it in my window and noticed that tree methods give the best rsq and rmse values. However, the forecasted temperatures did not look very convincing. There were random patterns in the ensemble members with an overall larger spread and disagreeing trends. Thus, I decided to go with the spline model which although seemed to have smaller rsq than the tree methods gave much better UQ i.e. ensembles members seemed to have some trend and be in agreement, with some spread
+
+```{r, eval = FALSE}
+our_model1 <- mars(mode = "regression")  |> set_engine("earth")
+
+our_model2 <- rand_forest(mode = "regression")  |> set_engine("randomForest")
+
+our_model3 <- bag_tree(mode = "regression")  |> set_engine("rpart")
+
+our_model4 <- arima_reg(mode = "regression")  |> set_engine("arima")
+
+our_model5 <- linear_reg(mode = "regression")  |> set_engine("lm")
+
+models <- c("mars", "rf", "bagtree","arima","lm")
+
+our_model <- list(our_model1, our_model2, our_model3, our_model4, our_model5)
+
+test_data_df <- na.omit(test_data)
+
+metrics <- matrix(NA, nrow = 2, ncol = length(our_model))
+colnames(metrics) <- models
+rownames(metrics) <- c("rmse", "rsq")
+
+for(i in 1:length(our_model)){
+  wflow <-
+    workflow() |> 
+    add_model(our_model[[i]]) |> 
+    add_recipe(our_recipe)
+  
+  fit <- wflow |> fit(data = train_data)
+  
+  predictions <- predict(fit, new_data = test_data_df)
+  pred_test <- bind_cols(test_data, predictions)
+  
+  multi_metric <- metric_set(rmse, rsq)
+  
+  metric_table <- pred_test |> 
+    multi_metric(truth = temperature, estimate = .pred)
+  
+  metrics[,i] <- metric_table$.estimate
+}
+```
+
+The model i chose was mars. 
+
+```{r}
+our_model <- our_model1 <- mars(mode = "regression")  |> set_engine("earth")
+
+wflow <-
+  workflow() |> 
+  add_model(our_model1) |> 
+  add_recipe(our_recipe)
+
+fit <- wflow |> fit(data = train_data)
+
+predictions <- predict(fit, new_data = test_data)
+pred_test <- bind_cols(test_data, predictions)
+
+multi_metric <- metric_set(rmse, rsq)
+
+metric_table <- pred_test |> 
+  multi_metric(truth = temperature, estimate = .pred)
+
+metric_table
+
+targets_future <- noaa_future_daily |> 
+  mutate(temperature = NA,
+         doy = yday(datetime)) |> 
+  filter(parameter == 1) |> 
+  select(-parameter)
+
+new_predictions <- predict(fit, new_data = targets_future)
+```
+
+```{r}
+targets_future <- noaa_future_daily |> 
+  mutate(temperature = NA,
+         doy = yday(datetime))
+
+tidymodels_forecast <- data.frame()
+
+for(i in unique(targets_future$parameter)){
+  curr_ens <- targets_future |> 
+    filter(parameter == i) |> 
+    select(-parameter)
+  
+  new_predictions <- predict(fit, new_data = curr_ens)
+  curr_ens <- bind_cols(curr_ens, new_predictions) |> 
+    mutate(parameter = i)
+  tidymodels_forecast <- bind_rows(tidymodels_forecast, curr_ens)
+}
+
+tidymodels_forecasts_EFI <- tidymodels_forecast %>%
+  rename(prediction = .pred) %>%
+  mutate(variable = "temperature") |> 
+  # For the EFI challenge we only want the forecast for future
+  filter(datetime > Sys.Date()) %>%
+  group_by(site_id, variable) %>%
+  mutate(reference_datetime = min(datetime) - lubridate::days(1),
+         family = "ensemble",
+         model_id = "tidymodels_lm") %>%
+  select(model_id, datetime, reference_datetime, site_id, family, parameter, variable, prediction)
+
+tidymodels_forecasts_EFI |>
+  filter(variable == "temperature") |>
+  ggplot(aes(x = datetime, y = prediction, group = parameter)) +
+  geom_line() + 
+  facet_wrap(~site_id)
+```
 
 ```{r make-standard}
 # Make forecast fit the EFI standards
 # Remember to change the model_id when you make changes to the model structure!
-my_model_id <- 'example_pvp1'
+my_model_id <- 'parulpatil_frec'
 
-temp_lm_forecast_EFI <- temp_lm_forecast %>%
-  filter(datetime > forecast_date) %>%
-  mutate(model_id = my_model_id,
-         reference_datetime = forecast_date,
-         family = 'ensemble',
-         parameter = as.character(parameter)) %>%
-  select(datetime, reference_datetime, site_id, family, parameter, variable, prediction, model_id)
-
+temp_lm_forecast_EFI <- tidymodels_forecasts_EFI
 ```
 
 ```{r write-forecast}
@@ -171,7 +305,6 @@ date <- temp_lm_forecast_EFI$reference_datetime[1]
 forecast_name_1 <- paste0(temp_lm_forecast_EFI$model_id[1], ".csv")
 forecast_file_1 <- paste(theme, date, forecast_name_1, sep = '-')
 forecast_file_1
-
 
 if (!dir.exists('Forecasts')) {
   dir.create('Forecasts')
@@ -202,3 +335,9 @@ temp_lm_forecast_EFI |>
   facet_wrap(~site_id) +
   labs(title = paste0('Forecast generated for ', temp_lm_forecast_EFI$variable[1], ' on ', temp_lm_forecast_EFI$reference_datetime[1]))
 ```
+
+
+
+
+
+
