@@ -24,6 +24,7 @@ install.packages("tidymodels")
 install.packages("parsnip")
 install.packages("baguette")
 install.packages("modeltime")
+install.packages("earth")
 # Load packages
 library(tidyverse)
 library(lubridate)
@@ -31,6 +32,7 @@ library(tidymodels)
 library(baguette)
 library(parsnip)
 library(modeltime)
+library(earth)
 ```
 
 ```{r get-targets, message=F}
